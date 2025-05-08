@@ -132,7 +132,7 @@ export default function Home() {
 
   return (
     <div style={styles.container}>
-      <h1 style={styles.title}>Land Registry PoC</h1>
+      <h1 style={styles.title}>Land Registry PoC?</h1>
       <p><strong>Account:</strong> {account}</p>
       <p><strong>Role:</strong> {roleLabel}</p>
 
