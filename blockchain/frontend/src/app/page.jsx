@@ -2,6 +2,7 @@
 import React, { useEffect, useState } from "react";
 import web3 from "./utils/web3";
 import contract from "./utils/contract";
+import { keccak256 } from "js-sha3";
 
 const ROLE = {
   None: 0,
@@ -18,8 +19,9 @@ export default function Home() {
     ownerName: "",
     locationAddress: "",
     areaSize: "",
+    picturePreview: "",
     pictureHash: "",
-    docHash: "",
+    pictureUrl: "",
   });
   const [landPapers, setLandPapers] = useState([]);
   const [reviewedMap, setReviewedMap] = useState({});
@@ -31,22 +33,46 @@ export default function Home() {
   useEffect(() => {
     async function loadRole() {
       const accounts = await web3.eth.getAccounts();
-      const acc = accounts[0];
-      setAccount(acc);
-
-      const roleIndexStr = await contract.methods.getRole(acc).call();
-      setRole(parseInt(roleIndexStr, 10));
+      setAccount(accounts[0] || "");
+      const onChainRole = await contract.methods.getRole(accounts[0]).call();
+      setRole(Number(onChainRole));
     }
     loadRole();
   }, []);
 
-  // only allow submit when all fields are filled
   const isSubmitFormValid =
     form.ownerName.trim() !== "" &&
     form.locationAddress.trim() !== "" &&
     form.areaSize.trim() !== "" &&
     form.pictureHash !== "" &&
-    form.docHash.trim() !== "";
+    form.pictureUrl !== "";
+
+  const handlePictureChange = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // 1) local preview
+    const previewUrl = URL.createObjectURL(file);
+
+    // 2) compute keccak256 hash
+    const buffer = await file.arrayBuffer();
+    const bytes = new Uint8Array(buffer);
+    const hash = "0x" + keccak256(bytes);
+
+    // 3) upload to your API
+    const data = new FormData();
+    data.append("file", file);
+    const res = await fetch("/api/upload", { method: "POST", body: data });
+    const { url: uploadedUrl } = await res.json();
+
+    // 4) update state
+    setForm((f) => ({
+      ...f,
+      picturePreview: previewUrl,
+      pictureHash: hash,
+      pictureUrl: uploadedUrl,
+    }));
+  };
 
   const handleSubmit = async () => {
     try {
@@ -56,17 +82,18 @@ export default function Home() {
           form.locationAddress,
           form.areaSize,
           form.pictureHash,
-          form.docHash
+          form.pictureUrl,
+          ""              // passing empty docHash
         )
         .send({ from: account });
-
       alert("Land submitted!");
       setForm({
         ownerName: "",
         locationAddress: "",
         areaSize: "",
+        picturePreview: "",
         pictureHash: "",
-        docHash: "",
+        pictureUrl: "",
       });
     } catch (err) {
       console.error(err);
@@ -77,15 +104,10 @@ export default function Home() {
   const loadAllLandPapers = async () => {
     const ids = Array.from({ length: 10 }, (_, i) => i);
     const results = await Promise.all(
-      ids.map((id) =>
-        contract.methods.getLand(id).call().catch(() => null)
-      )
+      ids.map((id) => contract.methods.getLand(id).call().catch(() => null))
     );
-
-    // only keep papers where id > 0
     const clean = results.filter((x) => x && Number(x.id) > 0);
     setLandPapers(clean);
-
     if (isOfficer) {
       const reviews = {};
       for (const paper of clean) {
@@ -132,7 +154,7 @@ export default function Home() {
 
   return (
     <div style={styles.container}>
-      <h1 style={styles.title}>Land Registry PoC?sdsd</h1>
+      <h1 style={styles.title}>Land Registry PoC</h1>
       <p><strong>Account:</strong> {account}</p>
       <p><strong>Role:</strong> {roleLabel}</p>
 
@@ -158,58 +180,38 @@ export default function Home() {
             placeholder="Owner Name"
             style={styles.input}
             value={form.ownerName}
-            onChange={(e) =>
-              setForm({ ...form, ownerName: e.target.value })
-            }
+            onChange={(e) => setForm({ ...form, ownerName: e.target.value })}
           />
           <input
             placeholder="Location Address"
             style={styles.input}
             value={form.locationAddress}
-            onChange={(e) =>
-              setForm({ ...form, locationAddress: e.target.value })
-            }
+            onChange={(e) => setForm({ ...form, locationAddress: e.target.value })}
           />
           <input
             placeholder="Area Size"
             style={styles.input}
             value={form.areaSize}
-            onChange={(e) =>
-              setForm({ ...form, areaSize: e.target.value })
-            }
+            onChange={(e) => setForm({ ...form, areaSize: e.target.value })}
           />
+
+          <label>Picture (preview + hash + upload URL)</label>
           <input
             type="file"
             accept="image/*"
             style={styles.input}
-            onChange={async (e) => {
-              const file = e.target.files?.[0];
-              if (!file) return;
-              const data = new FormData();
-              data.append("file", file);
-              const res = await fetch("/api/upload", {
-                method: "POST",
-                body: data,
-              });
-              const { url } = await res.json();
-              setForm({ ...form, pictureHash: url });
-            }}
+            onChange={handlePictureChange}
           />
-          {form.pictureHash && (
-            <img
-              src={form.pictureHash}
-              alt="Preview"
-              style={styles.preview}
-            />
+          {form.picturePreview && (
+            <img src={form.picturePreview} alt="Preview" style={styles.preview} />
           )}
-          <input
-            placeholder="Document Hash"
-            style={styles.input}
-            value={form.docHash}
-            onChange={(e) =>
-              setForm({ ...form, docHash: e.target.value })
-            }
-          />
+          {form.pictureHash && (
+            <p><strong>Picture Hash:</strong> {form.pictureHash}</p>
+          )}
+          {form.pictureUrl && (
+            <p><strong>Picture URL:</strong> <a href={form.pictureUrl} target="_blank" rel="noreferrer">{form.pictureUrl}</a></p>
+          )}
+
           <button
             onClick={handleSubmit}
             disabled={!isSubmitFormValid}
@@ -241,17 +243,22 @@ export default function Home() {
                 <p><strong>Owner:</strong> {paper.details.ownerName}</p>
                 <p><strong>Location:</strong> {paper.details.locationAddress}</p>
                 <p><strong>Area:</strong> {paper.details.areaSize}</p>
-                <p>
-                  <strong>Status:</strong>{" "}
-                  {["Pending", "Approved", "Rejected"][statusIndex]}
-                </p>
-                {paper.details.pictureHash && (
-                  <img
-                    src={paper.details.pictureHash}
-                    alt={`Land #${paper.id}`}
-                    style={styles.preview}
-                  />
-                )}
+                <p><strong>Status:</strong> {["Pending","Approved","Rejected"][statusIndex]}</p>
+                {paper.details.pictureUrl && (
+    <div className="imageContainer">
+      <img
+        src={paper.details.pictureUrl}
+        alt={`Land #${paper.id}`}
+        className="preview"       /* if you need extra img styling */
+      />
+      <button
+        onClick={() => window.open(paper.details.pictureUrl, "_blank")}
+      >
+        View Image
+      </button>
+    </div>
+  )}
+
                 {!pending ? (
                   <p style={{ color: "#888", marginTop: "1rem" }}>
                     <em>This submission has been finalized.</em>
@@ -261,23 +268,11 @@ export default function Home() {
                     <em>You have reviewed this.</em>
                   </p>
                 ) : (
-                  <div
-                    style={{
-                      marginTop: "1rem",
-                      display: "flex",
-                      gap: "1rem",
-                    }}
-                  >
-                    <button
-                      style={{ ...styles.button, background: "#1C6944" }}
-                      onClick={() => reviewLand(paper.id, true)}
-                    >
+                  <div style={{ marginTop: "1rem", display: "flex", gap: "1rem" }}>
+                    <button style={{ ...styles.button, background: "#1C6944" }} onClick={() => reviewLand(paper.id, true)}>
                       ✅ Approve
                     </button>
-                    <button
-                      style={{ ...styles.button, background: "#B91C1C" }}
-                      onClick={() => reviewLand(paper.id, false)}
-                    >
+                    <button style={{ ...styles.button, background: "#B91C1C" }} onClick={() => reviewLand(paper.id, false)}>
                       ❌ Reject
                     </button>
                   </div>
@@ -349,5 +344,25 @@ const styles = {
     borderTop: "1px solid #e2e2e2",
     paddingTop: "1rem",
     marginTop: "1rem",
+  },
+   imageContainer: {
+    display: "flex",
+    flexDirection: "column",    // stack vertically
+    alignItems: "center",       // center horizontally
+  },
+  preview: {
+    maxWidth: "25%",           // responsive
+    height: "auto",
+    // ...any other img styles you already had
+  },
+  button: {
+    marginTop: "0.5rem",        // space below image
+    background: "#2563EB",
+    color: "#fff",
+    border: "none",
+    padding: "0.5rem 1rem",
+    cursor: "pointer",
+    borderRadius: "4px",
+    // ...any other button styles you already had
   },
 };

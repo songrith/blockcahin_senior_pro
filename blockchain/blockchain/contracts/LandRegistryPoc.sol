@@ -10,6 +10,7 @@ contract LandRegistryPoC {
         string locationAddress;
         string areaSize;
         string pictureHash;
+        string pictureUrl;      // ← new field
     }
 
     struct LandPaper {
@@ -31,7 +32,7 @@ contract LandRegistryPoC {
     mapping(uint    => uint)                   public approvalCount;
 
     event Submitted(uint indexed id, address indexed owner);
-    event Reviewed(uint indexed id, Status status);
+    event Reviewed(uint indexed id, address indexed officer, Status status);
     event OfficerAdded(address indexed officer);
     event OfficerRemoved(address indexed officer);
     event SubmitterAdded(address indexed who);
@@ -72,11 +73,19 @@ contract LandRegistryPoC {
         emit SubmitterAdded(who);
     }
 
+    /// @notice Submit a new land paper.
+    /// @param ownerName Name of the land owner.
+    /// @param locationAddress Address or description of the land location.
+    /// @param areaSize Size of the land.
+    /// @param pictureHash Keccak-256 hash of the land picture.
+    /// @param pictureUrl   URL where the land picture is hosted.
+    /// @param docHash      Hash of the supporting document.
     function submitLand(
         string calldata ownerName,
         string calldata locationAddress,
         string calldata areaSize,
         string calldata pictureHash,
+        string calldata pictureUrl,
         string calldata docHash
     )
         external
@@ -85,7 +94,7 @@ contract LandRegistryPoC {
         landPapers[nextId] = LandPaper(
             nextId,
             msg.sender,
-            LandDetails(ownerName, locationAddress, areaSize, pictureHash),
+            LandDetails(ownerName, locationAddress, areaSize, pictureHash, pictureUrl),
             docHash,
             Status.Pending
         );
@@ -94,25 +103,27 @@ contract LandRegistryPoC {
     }
 
     function reviewLandMulti(uint id, bool approve) external onlyOfficer {
-        require(landPapers[id].status == Status.Pending, "Already reviewed");
+        require(id < nextId, "Not found");
+        require(landPapers[id].status == Status.Pending, "Already finalized");
         require(!approvals[id][msg.sender], "Already reviewed by you");
 
         approvals[id][msg.sender] = true;
 
         if (!approve) {
             landPapers[id].status = Status.Rejected;
-            emit Reviewed(id, Status.Rejected);
+            emit Reviewed(id, msg.sender, Status.Rejected);
             return;
         }
 
         approvalCount[id]++;
         if (approvalCount[id] >= requiredApprovals) {
             landPapers[id].status = Status.Approved;
-            emit Reviewed(id, Status.Approved);
+            emit Reviewed(id, msg.sender, Status.Approved);
         }
     }
 
     function getLand(uint id) external view returns (LandPaper memory) {
+        require(id < nextId, "Not found");
         return landPapers[id];
     }
 
