@@ -6,30 +6,29 @@ contract LandRegistryPoC {
     enum Role   { None, Submitter, Officer, Admin }
 
     struct LandDetails {
-        string ownerName;
-        string locationAddress;
-        string areaSize;
-        string pictureHash;
-        string pictureUrl;      // ← new field
+        uint    id;
+        string  ownerName;
+        string  locationAddress;
+        string  areaSize;
+        string  pictureHash;
+        string  pictureUrl;
     }
 
     struct LandPaper {
-        uint id;
-        address owner;
+        address    owner;
         LandDetails details;
-        string docHash;
-        Status status;
+        string     docHash;
+        Status     status;
     }
 
     address public admin;
-    uint    public nextId;
     uint    public requiredApprovals = 2;
 
-    mapping(address => bool)                   public submitters;
-    mapping(uint    => LandPaper)              public landPapers;
-    mapping(address => bool)                   public authorizedOfficers;
+    mapping(address => bool)                    public submitters;
+    mapping(uint    => LandPaper)               public landPapers;
+    mapping(address => bool)                    public authorizedOfficers;
     mapping(uint    => mapping(address=>bool)) public approvals;
-    mapping(uint    => uint)                   public approvalCount;
+    mapping(uint    => uint)                    public approvalCount;
 
     event Submitted(uint indexed id, address indexed owner);
     event Reviewed(uint indexed id, address indexed officer, Status status);
@@ -73,37 +72,25 @@ contract LandRegistryPoC {
         emit SubmitterAdded(who);
     }
 
-    /// @notice Submit a new land paper.
-    /// @param ownerName Name of the land owner.
-    /// @param locationAddress Address or description of the land location.
-    /// @param areaSize Size of the land.
-    /// @param pictureHash Keccak-256 hash of the land picture.
-    /// @param pictureUrl   URL where the land picture is hosted.
-    /// @param docHash      Hash of the supporting document.
+    /// @notice Submit a new land paper; details.id carries the identifier
     function submitLand(
-        string calldata ownerName,
-        string calldata locationAddress,
-        string calldata areaSize,
-        string calldata pictureHash,
-        string calldata pictureUrl,
+        LandDetails calldata details,
         string calldata docHash
-    )
-        external
-        onlySubmitter
-    {
-        landPapers[nextId] = LandPaper(
-            nextId,
+    ) external onlySubmitter {
+        uint id = details.id;
+        require(landPapers[id].owner == address(0), "ID exists");
+
+        landPapers[id] = LandPaper(
             msg.sender,
-            LandDetails(ownerName, locationAddress, areaSize, pictureHash, pictureUrl),
+            details,
             docHash,
             Status.Pending
         );
-        emit Submitted(nextId, msg.sender);
-        nextId++;
+        emit Submitted(id, msg.sender);
     }
 
     function reviewLandMulti(uint id, bool approve) external onlyOfficer {
-        require(id < nextId, "Not found");
+        require(landPapers[id].owner != address(0), "Not found");
         require(landPapers[id].status == Status.Pending, "Already finalized");
         require(!approvals[id][msg.sender], "Already reviewed by you");
 
@@ -123,7 +110,7 @@ contract LandRegistryPoC {
     }
 
     function getLand(uint id) external view returns (LandPaper memory) {
-        require(id < nextId, "Not found");
+        require(landPapers[id].owner != address(0), "Not found");
         return landPapers[id];
     }
 
@@ -135,16 +122,10 @@ contract LandRegistryPoC {
         return approvals[id][officer];
     }
 
-    /// @notice Returns 0=No role, 1=Submitter, 2=Officer, 3=Admin
     function getRole(address who) external view returns (Role) {
-        if (who == admin) {
-            return Role.Admin;
-        } else if (authorizedOfficers[who]) {
-            return Role.Officer;
-        } else if (submitters[who]) {
-            return Role.Submitter;
-        } else {
-            return Role.None;
-        }
+        if (who == admin) return Role.Admin;
+        if (authorizedOfficers[who]) return Role.Officer;
+        if (submitters[who]) return Role.Submitter;
+        return Role.None;
     }
 }

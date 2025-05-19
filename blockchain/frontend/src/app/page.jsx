@@ -16,15 +16,18 @@ export default function Home() {
   const [role, setRole] = useState(ROLE.None);
   const [newOfficerAddress, setNewOfficerAddress] = useState("");
   const [form, setForm] = useState({
+    id: "",
     ownerName: "",
     locationAddress: "",
     areaSize: "",
     picturePreview: "",
     pictureHash: "",
     pictureUrl: "",
+    docHash: "",
   });
   const [landPapers, setLandPapers] = useState([]);
   const [reviewedMap, setReviewedMap] = useState({});
+  const [submitting, setSubmitting] = useState(false);
 
   const isAdmin = role === ROLE.Admin;
   const isOfficer = role === ROLE.Officer;
@@ -33,91 +36,121 @@ export default function Home() {
   useEffect(() => {
     async function loadRole() {
       const accounts = await web3.eth.getAccounts();
-      setAccount(accounts[0] || "");
-      const onChainRole = await contract.methods.getRole(accounts[0]).call();
+      const addr = accounts[0] || "";
+      setAccount(addr);
+      const onChainRole = await contract.methods.getRole(addr).call();
       setRole(Number(onChainRole));
     }
     loadRole();
   }, []);
 
   const isSubmitFormValid =
-    form.ownerName.trim() !== "" &&
-    form.locationAddress.trim() !== "" &&
-    form.areaSize.trim() !== "" &&
-    form.pictureHash !== "" &&
-    form.pictureUrl !== "";
+    form.id.trim() &&
+    form.ownerName.trim() &&
+    form.locationAddress.trim() &&
+    form.areaSize.trim() &&
+    form.pictureHash &&
+    form.pictureUrl;
 
   const handlePictureChange = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
-    // 1) local preview
     const previewUrl = URL.createObjectURL(file);
-
-    // 2) compute keccak256 hash
     const buffer = await file.arrayBuffer();
-    const bytes = new Uint8Array(buffer);
-    const hash = "0x" + keccak256(bytes);
-
-    // 3) upload to your API
+    const hash = "0x" + keccak256(new Uint8Array(buffer));
     const data = new FormData();
     data.append("file", file);
     const res = await fetch("/api/upload", { method: "POST", body: data });
     const { url: uploadedUrl } = await res.json();
-
-    // 4) update state
-    setForm((f) => ({
-      ...f,
-      picturePreview: previewUrl,
-      pictureHash: hash,
-      pictureUrl: uploadedUrl,
-    }));
+    setForm((f) => ({ ...f, picturePreview: previewUrl, pictureHash: hash, pictureUrl: uploadedUrl }));
   };
 
-  const handleSubmit = async () => {
+    const handleSubmit = async () => {
+    if (!isSubmitFormValid || !isSubmitter) return;
+    setSubmitting(true);
     try {
+      const landId = Number(form.id);
+      const detailsTuple = [
+        landId,
+        form.ownerName,
+        form.locationAddress,
+        form.areaSize,
+        form.pictureHash,
+        form.pictureUrl,
+      ];
       await contract.methods
-        .submitLand(
-          form.ownerName,
-          form.locationAddress,
-          form.areaSize,
-          form.pictureHash,
-          form.pictureUrl,
-          ""              // passing empty docHash
-        )
+        .submitLand(detailsTuple, form.docHash || "")
         .send({ from: account });
-      alert("Land submitted!");
+      // Reset form
       setForm({
+        id: "",
         ownerName: "",
         locationAddress: "",
         areaSize: "",
         picturePreview: "",
         pictureHash: "",
         pictureUrl: "",
+        docHash: "",
       });
+      alert("Land submitted successfully!");
     } catch (err) {
       console.error(err);
       alert("Submission failed: " + err.message);
+    } finally {
+      setSubmitting(false);
     }
   };
 
-  const loadAllLandPapers = async () => {
-    const ids = Array.from({ length: 10 }, (_, i) => i);
-    const results = await Promise.all(
-      ids.map((id) => contract.methods.getLand(id).call().catch(() => null))
-    );
-    const clean = results.filter((x) => x && Number(x.id) > 0);
-    setLandPapers(clean);
-    if (isOfficer) {
-      const reviews = {};
-      for (const paper of clean) {
-        reviews[paper.id] = await contract.methods
+  // Load & flatten land papers
+ const loadAllLandPapers = async () => {
+  let ids = [];
+  try {
+    const events = await contract.getPastEvents("Submitted", {
+      fromBlock:184,
+      toBlock:   "latest",
+    });
+    // parse + dedupe
+    ids = [...new Set(events.map(e => Number(e.returnValues.id)))];
+  } catch (err) {
+    console.error("Failed to fetch events:", err);
+    return;
+  }
+
+  // fetch each paper
+  const results = await Promise.all(
+    ids.map(id => contract.methods.getLand(id).call().catch(() => null))
+  );
+
+  // flatten
+  const clean = results
+    .filter(r => r)
+    .map(r => ({
+      id:      Number(r.details.id),
+      details: {
+        ownerName:      r.details.ownerName,
+        locationAddress:r.details.locationAddress,
+        areaSize:       r.details.areaSize,
+        pictureUrl:     r.details.pictureUrl,
+      },
+      status: Number(r.status),
+    }));
+
+  setLandPapers(clean);
+
+  // batch‐check reviews
+  if (isOfficer) {
+    const reviewEntries = await Promise.all(
+      clean.map(paper =>
+        contract.methods
           .hasReviewed(paper.id, account)
-          .call();
-      }
-      setReviewedMap(reviews);
-    }
-  };
+          .call()
+          .then(flag => [paper.id, flag])
+      )
+    );
+    setReviewedMap(Object.fromEntries(reviewEntries));
+  }
+};
+
 
   const reviewLand = async (id, approve) => {
     try {
@@ -177,13 +210,19 @@ export default function Home() {
         <section style={styles.card}>
           <h2 style={styles.subtitle}>Submit Land</h2>
           <input
+            placeholder="Land ID"
+            style={styles.input}
+            value={form.id}
+            onChange={(e) => setForm({ ...form, id: e.target.value })}
+          />
+          <input
             placeholder="Owner Name"
             style={styles.input}
             value={form.ownerName}
             onChange={(e) => setForm({ ...form, ownerName: e.target.value })}
           />
           <input
-            placeholder="Location Address"
+            placeholder="Address and information"
             style={styles.input}
             value={form.locationAddress}
             onChange={(e) => setForm({ ...form, locationAddress: e.target.value })}
@@ -211,17 +250,9 @@ export default function Home() {
           {form.pictureUrl && (
             <p><strong>Picture URL:</strong> <a href={form.pictureUrl} target="_blank" rel="noreferrer">{form.pictureUrl}</a></p>
           )}
-
-          <button
-            onClick={handleSubmit}
-            disabled={!isSubmitFormValid}
-            style={{
-              ...styles.button,
-              opacity: isSubmitFormValid ? 1 : 0.5,
-              cursor: isSubmitFormValid ? "pointer" : "not-allowed",
-            }}
-          >
-            Submit
+       
+           <button disabled={!isSubmitFormValid || submitting} onClick={handleSubmit} style={styles.button}>
+            {submitting ? "Submitting..." : "Submit"}
           </button>
         </section>
       )}
@@ -241,7 +272,7 @@ export default function Home() {
               <div key={paper.id} style={styles.paperCard}>
                 <p><strong>ID:</strong> {paper.id}</p>
                 <p><strong>Owner:</strong> {paper.details.ownerName}</p>
-                <p><strong>Location:</strong> {paper.details.locationAddress}</p>
+                <p><strong>Address and Infromation:</strong> {paper.details.locationAddress}</p>
                 <p><strong>Area:</strong> {paper.details.areaSize}</p>
                 <p><strong>Status:</strong> {["Pending","Approved","Rejected"][statusIndex]}</p>
                 {paper.details.pictureUrl && (
