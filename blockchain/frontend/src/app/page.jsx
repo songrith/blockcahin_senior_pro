@@ -246,17 +246,13 @@ export default function Home() {
                 <p><strong>Status:</strong> {["Pending","Approved","Rejected"][statusIndex]}</p>
                 {paper.details.pictureUrl && (
     <div className="imageContainer">
-      <img
-        src={paper.details.pictureUrl}
-        alt={`Land #${paper.id}`}
-        className="preview"       /* if you need extra img styling */
-      />
-      <button
-        onClick={() => window.open(paper.details.pictureUrl, "_blank")}
-      >
-        View Image
-      </button>
-    </div>
+  <button
+    onClick={() => window.open(paper.details.pictureUrl, "_blank")}
+    style={styles.viewImageButton}
+  >
+    View Image
+  </button>
+</div>
   )}
 
                 {!pending ? (
@@ -365,4 +361,29 @@ const styles = {
     borderRadius: "4px",
     // ...any other button styles you already had
   },
+  imageContainer: {
+    display: "flex",
+    flexDirection: "column",    // stack vertically
+    alignItems: "center",       // center horizontally
+  },
+
+  viewImageButton: {
+    marginTop: "0.5rem",        // space below image
+    background: "linear-gradient(145deg, #6e7bff, #5560ea)",  // gradient effect
+    color: "#fff",
+    border: "none",
+    padding: "0.75rem 1.5rem",
+    cursor: "pointer",
+    borderRadius: "25px",       // rounded corners for a smooth look
+    fontWeight: "bold",         // bolder text
+    boxShadow: "2px 2px 8px rgba(0, 0, 0, 0.1)", // subtle shadow
+    transition: "all 0.3s ease",  // smooth transition for hover effect
+  },
+
+  // Optional: Hover effect
+  viewImageButtonHover: {
+    background: "linear-gradient(145deg, #5560ea, #6e7bff)",  // reverse gradient on hover
+    transform: "scale(1.05)",    // slightly enlarge button on hover
+    boxShadow: "4px 4px 12px rgba(0, 0, 0, 0.15)", // stronger shadow on hover
+  }
 };
